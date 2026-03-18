@@ -114,22 +114,14 @@ class LeRobotLabUtopiaDataset(Dataset):
             self.info = json.load(f)
 
         # 加载任务描述
-        tasks_df = pd.read_parquet(self.dataset_path / "meta" / "tasks.parquet")
+                # 加载任务描述
+        tasks_df = pd.read_json(self.dataset_path / "meta" / "tasks.jsonl", lines=True)
         self.task_descriptions = {}
         for _, row in tasks_df.iterrows():
-            # tasks.parquet: columns = [task_description, task_index] or index is task description
-            if "task_index" in tasks_df.columns:
-                self.task_descriptions[row["task_index"]] = tasks_df.index[_] if isinstance(
-                    tasks_df.index[_], str
-                ) else row.get("task", row.name)
+            if "task_index" in tasks_df.columns and "task" in tasks_df.columns:
+                self.task_descriptions[row["task_index"]] = row["task"]
             else:
                 self.task_descriptions[_] = row.name
-
-        # 从 tasks.parquet 解析 — 索引是任务描述文本
-        self.task_descriptions = {}
-        for task_desc in tasks_df.index:
-            task_idx = tasks_df.loc[task_desc, "task_index"]
-            self.task_descriptions[task_idx] = task_desc
 
         # 加载所有 parquet 数据
         data_files = sorted((self.dataset_path / "data").rglob("*.parquet"))
@@ -228,8 +220,8 @@ class LeRobotLabUtopiaDataset(Dataset):
         instruction = self.task_descriptions.get(task_idx, "perform the task")
 
         # 状态和动作
-        state = np.array(row["observation.state"], dtype=np.float32)
-        action_current = np.array(row["action"], dtype=np.float32)
+        state = np.array(row["state"], dtype=np.float32)
+        action_current = np.array(row["actions"], dtype=np.float32)
 
         # 构建动作窗口 (window_size 步)
         ep_start = self.episode_starts[ep_idx]
@@ -240,7 +232,7 @@ class LeRobotLabUtopiaDataset(Dataset):
             if future_idx <= ep_end:
                 future_row = self.data.iloc[future_idx]
                 if int(future_row["episode_index"]) == ep_idx:
-                    actions.append(np.array(future_row["action"], dtype=np.float32))
+                    actions.append(np.array(future_row["actions"], dtype=np.float32))
                 else:
                     actions.append(actions[-1] if actions else action_current)
             else:

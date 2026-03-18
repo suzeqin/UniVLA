@@ -21,11 +21,11 @@ set -euo pipefail
 
 # CUDA 配置
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-"0,1"}
-export CUDA_HOME=${CUDA_HOME:-"/usr/local/cuda-12.8"}
+export CUDA_HOME=${CUDA_HOME:-"/usr/local/cuda-12.2"}
 export LD_LIBRARY_PATH=$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-""}
 
 # Conda 环境（根据实际环境名称修改）
-CONDA_ROOT=${CONDA_ROOT:-/data/rbc/miniconda3}
+CONDA_ROOT=${CONDA_ROOT:-/home/suzeqin/miniconda3}
 CONDA_ENV=${CONDA_ENV:-"univla"}
 if [ -f "${CONDA_ROOT}/etc/profile.d/conda.sh" ]; then
     source ${CONDA_ROOT}/etc/profile.d/conda.sh
@@ -51,16 +51,16 @@ cd ${PROJ_ROOT}
 
 # ===== 模型路径（按需修改）=====
 # UniVLA-7B 预训练权重路径
-VLA_PATH="${VLA_PATH:-/data/rbc/Embodied_models/univla-7b}"
+VLA_PATH="${VLA_PATH:-/data/suzeqin/univla-7b}"
 
 # LAM Stage-2 检查点路径（相对于项目根目录）
-LAM_PATH="${LAM_PATH:-latent_action_model/logs/task_centric_lam_stage2/epoch=0-step=200000.ckpt}"
-
+# LAM_PATH="${LAM_PATH:-latent_action_model/logs/task_centric_lam_stage2/epoch=0-step=200000.ckpt}"
+LAM_PATH=/data/suzeqin/univla-lam/lam-stage-2.ckpt
 # ===== 数据集配置 =====
 # LeRobot 数据集根目录
-DATASET_ROOT="${DATASET_ROOT:-/data1/rbc/lerobot/.cache}"
+DATASET_ROOT="${DATASET_ROOT:-/data/suzeqin}"
 # 数据集仓库 ID（对应 DATASET_ROOT 下的子目录路径）
-REPO_ID="${REPO_ID:-LabUtopia/Level3_TransportBeaker}"
+REPO_ID="${REPO_ID:-LabUtopia/Level3_pick}"
 # 使用的相机（多相机用逗号分隔，如 "camera_1_rgb,camera_2_rgb"）
 CAMERA_NAMES="${CAMERA_NAMES:-camera_1_rgb}"
 
@@ -117,3 +117,4 @@ accelerate launch \
     --lora_rank=${LORA_RANK} \
     --freeze_vla=${FREEZE_VLA} \
     --wandb_project="univla-finetune-labutopia"
+
