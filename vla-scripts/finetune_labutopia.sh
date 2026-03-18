@@ -61,8 +61,10 @@ LAM_PATH=/data/suzeqin/univla-lam/lam-stage-2.ckpt
 DATASET_ROOT="${DATASET_ROOT:-/data/suzeqin}"
 # 数据集仓库 ID（对应 DATASET_ROOT 下的子目录路径）
 REPO_ID="${REPO_ID:-LabUtopia/Level3_pick}"
-# 使用的相机（多相机用逗号分隔，如 "camera_1_rgb,camera_2_rgb"）
-CAMERA_NAMES="${CAMERA_NAMES:-camera_1_rgb}"
+# 使用的相机（多相机用逗号分隔）
+CAMERA_NAMES="${CAMERA_NAMES:-camera_1_rgb,camera_2_rgb,camera_3_rgb}"
+# 多相机合成布局：single / horizontal / vertical / grid_2x2
+CAMERA_LAYOUT="${CAMERA_LAYOUT:-grid_2x2}"
 
 # ===== 训练超参 =====
 BATCH_SIZE=${BATCH_SIZE:-4}            # 每 GPU batch size
@@ -87,6 +89,7 @@ echo "  LAM 权重      : ${LAM_PATH}"
 echo "  数据集根目录  : ${DATASET_ROOT}"
 echo "  数据集        : ${REPO_ID}"
 echo "  相机          : ${CAMERA_NAMES}"
+echo "  相机布局      : ${CAMERA_LAYOUT}"
 echo "  Batch size    : ${BATCH_SIZE} × accum ${GRAD_ACCUM}"
 echo "  总步数        : ${MAX_STEPS}"
 echo "  学习率        : ${LR}"
@@ -105,6 +108,7 @@ accelerate launch \
     --dataset_root="${DATASET_ROOT}" \
     --repo_id="${REPO_ID}" \
     --camera_names="${CAMERA_NAMES}" \
+    --camera_layout="${CAMERA_LAYOUT}" \
     --batch_size=${BATCH_SIZE} \
     --max_steps=${MAX_STEPS} \
     --save_steps=${SAVE_STEPS} \
@@ -117,4 +121,3 @@ accelerate launch \
     --lora_rank=${LORA_RANK} \
     --freeze_vla=${FREEZE_VLA} \
     --wandb_project="univla-finetune-labutopia"
-

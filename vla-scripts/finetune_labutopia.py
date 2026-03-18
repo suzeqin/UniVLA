@@ -37,6 +37,7 @@ import torch.nn as nn
 import torch.distributed as dist
 import torchvision.transforms as T
 import tqdm
+from PIL import Image
 from accelerate import PartialState, Accelerator, DistributedDataParallelKwargs
 from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 from torch.optim import AdamW
@@ -62,6 +63,47 @@ from prismatic.extern.hf.processing_prismatic import (
 from prismatic.models.policy.transformer_utils import MAPBlock
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+
+def compose_camera_frames(frames: List[torch.Tensor], layout: str) -> torch.Tensor:
+    """Compose multiple camera frames into a single RGB tensor for UniVLA.
+
+    UniVLA's current processor/model path accepts one image per sample, not three
+    independent camera tensors. To use all cameras without changing the backbone,
+    we compose them into one fixed-layout RGB image and keep the same layout for
+    both training and inference.
+    """
+    if len(frames) == 0:
+        raise ValueError("`frames` must contain at least one image tensor.")
+
+    if len(frames) == 1 or layout == "single":
+        return frames[0]
+
+    if layout not in {"grid_2x2", "horizontal", "vertical"}:
+        raise ValueError(f"Unsupported camera layout: {layout}")
+
+    base = frames[0]
+    normalized_frames = []
+    for frame in frames:
+        if frame.shape != base.shape:
+            frame = T.Resize(base.shape[-2:], antialias=True)(frame)
+        normalized_frames.append(frame)
+    frames = normalized_frames
+
+    if layout == "horizontal":
+        return torch.cat(frames, dim=2)
+
+    if layout == "vertical":
+        return torch.cat(frames, dim=1)
+
+    # Default: 2x2 grid. For 3 cameras, the fourth slot is a black image.
+    padded_frames = list(frames[:4])
+    while len(padded_frames) < 4:
+        padded_frames.append(torch.zeros_like(base))
+
+    top = torch.cat([padded_frames[0], padded_frames[1]], dim=2)
+    bottom = torch.cat([padded_frames[2], padded_frames[3]], dim=2)
+    return torch.cat([top, bottom], dim=1)
 
 
 # ========================= LeRobot V3.0 数据集加载 =========================
@@ -93,6 +135,7 @@ class LeRobotLabUtopiaDataset(Dataset):
         repo_id: str,
         camera_names: List[str],
         image_transform,
+        camera_layout: str = "grid_2x2",
         window_size: int = 12,
         image_size: int = 224,
         action_dim: int = 8,
@@ -104,6 +147,7 @@ class LeRobotLabUtopiaDataset(Dataset):
         self.dataset_path = Path(dataset_root) / repo_id
         self.camera_names = camera_names
         self.image_transform = image_transform
+        self.camera_layout = camera_layout
         self.window_size = window_size
         self.image_size = image_size
         self.action_dim = action_dim
@@ -207,6 +251,10 @@ class LeRobotLabUtopiaDataset(Dataset):
         frame = self.resize_transform(frame)
         return frame
 
+    def _load_multiview_frame(self, global_idx: int) -> torch.Tensor:
+        frames = [self._load_frame_image(global_idx, camera_name) for camera_name in self.camera_names]
+        return compose_camera_frames(frames, self.camera_layout)
+
     def __len__(self):
         return self.total_frames
 
@@ -239,19 +287,17 @@ class LeRobotLabUtopiaDataset(Dataset):
                 actions.append(actions[-1] if actions else action_current)
         actions = np.stack(actions, axis=0)  # (window_size, action_dim)
 
-        # 加载当前帧图像（第一个相机作为主相机）
-        primary_cam = self.camera_names[0]
-        current_image = self._load_frame_image(idx, primary_cam)
+        # 加载当前帧多相机图像，并按照固定布局拼成单张 RGB 图。
+        current_image = self._load_multiview_frame(idx)
 
-        # 加载下一帧图像用于 LAM 编码
+        # 加载下一帧图像用于 LAM 编码，布局必须与当前帧一致。
         next_idx = min(idx + 1, ep_end)
         if int(self.data.iloc[next_idx]["episode_index"]) != ep_idx:
             next_idx = idx  # episode 末尾则使用当前帧
-        next_image = self._load_frame_image(next_idx, primary_cam)
+        next_image = self._load_multiview_frame(next_idx)
 
         # 将图像通过 image_transform 处理为 VLA 输入格式 (224x224)
         # UniVLA 的 processor 需要 PIL Image 输入
-        from PIL import Image
         current_pil = Image.fromarray(
             (current_image.permute(1, 2, 0).numpy() * 255).astype(np.uint8)
         )
@@ -420,7 +466,8 @@ class FinetuneConfig:
     # ---- 数据路径 ----
     dataset_root: str = "/data1/rbc/lerobot/.cache"
     repo_id: str = "LabUtopia/Level3_TransportBeaker"
-    camera_names: str = "camera_1_rgb"  # 逗号分隔的相机名列表
+    camera_names: str = "camera_1_rgb,camera_2_rgb,camera_3_rgb"  # 逗号分隔的相机名列表
+    camera_layout: str = "grid_2x2"  # 多相机合成布局: single, horizontal, vertical, grid_2x2
     dataset_name: str = "labutopia_level3_transport_beaker"
 
     # ---- 输出路径 ----
@@ -588,6 +635,7 @@ def finetune(cfg: FinetuneConfig) -> None:
         repo_id=cfg.repo_id,
         camera_names=camera_list,
         image_transform=processor.image_processor.apply_transform,
+        camera_layout=cfg.camera_layout,
         window_size=cfg.window_size,
         image_size=224,
         action_dim=cfg.action_dim,
